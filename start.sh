@@ -72,12 +72,13 @@ docker run "${args[@]}" "${rootfs_vol}" --name=kxd --detach "${labels}" "${image
 readonly primary_address=192.168.65.2
 docker exec --tty --interactive kxd kubeadm init --skip-preflight-checks --api-advertise-addresses="${primary_address}" --api-advertise-addresses=127.0.0.1
 docker exec --tty --interactive kxd kubectl create --filename /etc/weave-daemonset.yaml
+docker exec --tty --interactive kxd kubectl taint node moby dedicated:NoSchedule-
+docker exec --tty --interactive kxd kubectl get nodes --output wide
 
 readonly proxy_port=8443
 docker run --detach --tty --interactive --publish="${proxy_port}:${proxy_port}" "${labels}" "${image_name}:shell" "socat TCP-LISTEN:${proxy_port},fork TCP:${primary_address}:6443"
 
-docker cp kxd:/etc/kubernetes/admin.conf kubeconfig
-export KUBECONFIG=kubeconfig
-kubectl config set-cluster kubernetes --server="https://127.0.0.1:${proxy_port}"
-kubectl taint node moby dedicated:NoSchedule-
-kubectl get nodes
+## Uncomment if you have kubectl installed and want to use it
+# docker cp kxd:/etc/kubernetes/admin.conf kubeconfig
+# export KUBECONFIG=kubeconfig
+# kubectl config set-cluster kubernetes --server="https://127.0.0.1:${proxy_port}"
