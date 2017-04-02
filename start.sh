@@ -8,6 +8,8 @@ set -o pipefail
 set -o nounset
 
 readonly image_name="errordeveloper/kxd"
+readonly shell_image_name="${image_name}:shell@sha256:a4303435a98724f390ed902debb592f40f656ac539dd63068c9a45376312232d"
+readonly kubelet_image_name="${image_name}:kubelet@sha256:2861f913975a7f77d209e42cdcbf8a34b964fce10e2f1b87381141e23fa35a45"
 
 ## TODO rootfs should be mounted read-only, this is because of CNI hack...
 sys_volumes=(
@@ -46,20 +48,20 @@ rootfs_vol="--volume=/:/rootfs:rw"
 ## TODO this will fail on the first run for numerous reasons
 # - directories missing in /, so Docker for Mac will refuse mounts
 # - does kubeadm reset fail miserably?
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "mkdir -p /rootfs/etc/kubernetes"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "mkdir -p /rootfs/var/lib/kubelet"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "mkdir -p /rootfs/var/log/containers"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "mkdir -p /rootfs/etc/cni"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "mkdir -p /rootfs/opt/cni"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "cp -r /opt/cni/bin /rootfs/opt/cni"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "nsenter --mount=/proc/1/ns/mnt -- mount --bind /var/lib/kubelet /var/lib/kubelet"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "nsenter --mount=/proc/1/ns/mnt -- mount --make-rshared /var/lib/kubelet"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "mkdir -p /rootfs/etc/kubernetes"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "mkdir -p /rootfs/var/lib/kubelet"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "mkdir -p /rootfs/var/log/containers"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "mkdir -p /rootfs/etc/cni"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "mkdir -p /rootfs/opt/cni"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "cp -r /opt/cni/bin /rootfs/opt/cni"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "nsenter --mount=/proc/1/ns/mnt -- mount --bind /var/lib/kubelet /var/lib/kubelet"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "nsenter --mount=/proc/1/ns/mnt -- mount --make-rshared /var/lib/kubelet"
 
 for v in "${kxd_volumes[@]}" ; do args+=("--volume=${v}") ; done
 rootfs_vol="--volume=/:/rootfs:ro"
 
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "rm -r -f /var/lib/etcd && mkdir -p /var/lib/etcd"
-docker run "${args[@]}" "${rootfs_vol}" --rm "${image_name}:shell" "kubeadm reset"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "rm -r -f /var/lib/etcd && mkdir -p /var/lib/etcd"
+docker run "${args[@]}" "${rootfs_vol}" --rm "${shell_image_name}" "kubeadm reset"
 
 if [ "$#" -gt 0 ] ; then
   echo "$*" | grep -q '\--only-reset' && exit
@@ -67,17 +69,17 @@ fi
 
 readonly labels="--label=${infra_label}"
 
-docker run "${args[@]}" "${rootfs_vol}" --name=kxd --detach "${labels}" "${image_name}:kubelet"
+docker run "${args[@]}" "${rootfs_vol}" --name=kxd --detach "${labels}" "${kubelet_image_name}"
 
 ## TODO it is possible Docker for Mac VM gets a different address on eth0
 readonly primary_address=192.168.65.2
-docker exec --tty --interactive kxd kubeadm init --skip-preflight-checks --api-advertise-addresses="${primary_address}" --api-advertise-addresses=127.0.0.1
+docker exec --tty --interactive kxd kubeadm init --skip-preflight-checks --use-kubernetes-version="v1.5.2" --api-advertise-addresses="${primary_address}" --api-advertise-addresses=127.0.0.1
 docker exec --tty --interactive kxd kubectl create --filename /etc/weave-daemonset.yaml
 docker exec --tty --interactive kxd kubectl taint node moby dedicated:NoSchedule-
 docker exec --tty --interactive kxd kubectl get nodes --output wide
 
 readonly proxy_port=8443
-docker run --detach --tty --interactive --publish="${proxy_port}:${proxy_port}" "${labels}" "${image_name}:shell" "socat TCP-LISTEN:${proxy_port},fork TCP:${primary_address}:6443"
+docker run --detach --tty --interactive --publish="${proxy_port}:${proxy_port}" "${labels}" "${shell_image_name}" "socat TCP-LISTEN:${proxy_port},fork TCP:${primary_address}:6443"
 
 ## Uncomment if you have kubectl installed and want to use it
 # docker cp kxd:/etc/kubernetes/admin.conf kubeconfig
